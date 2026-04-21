@@ -1,11 +1,11 @@
-# Cloud Misconfiguration Scanner
+# CloudHawk 🦅
 
 ![Python](https://img.shields.io/badge/Python-3.10%2B-blue?logo=python)
 ![Providers](https://img.shields.io/badge/Providers-AWS%20%7C%20Azure%20%7C%20GCP-orange)
-![Tests](https://img.shields.io/badge/Tests-120%20passed-brightgreen)
+![Tests](https://img.shields.io/badge/Tests-156%20passed-brightgreen)
 ![License](https://img.shields.io/badge/License-MIT-green)
 
-A modular, multi-cloud security scanner that detects misconfigurations across **AWS**, **Azure**, and **GCP** — in parallel, with no cloud credentials hard-coded.
+**CloudHawk** is a modular, multi-cloud security scanner that detects misconfigurations across **AWS**, **Azure**, and **GCP** — in parallel, with no cloud credentials hard-coded.
 
 ---
 
@@ -65,7 +65,7 @@ cloud-misconfiguration-scanner/
 ## Installation
 
 ```bash
-git clone https://github.com/omarbabba779xx/cloud-misconfiguration-scanner.git
+git clone https://github.com/omarbabba779xx/cloudhawk.git
 cd cloud-misconfiguration-scanner
 pip install -r requirements.txt
 ```
