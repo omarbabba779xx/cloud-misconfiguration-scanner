@@ -232,7 +232,7 @@ class IAMScanner(BaseScanner):
                 issues.append("no symbol requirement")
             if not policy.get("ExpirePasswords"):
                 issues.append("passwords never expire")
-            if not policy.get("PreventPasswordReuse"):
+            if not policy.get("PasswordReusePrevention"):
                 issues.append("no password reuse prevention")
             if issues:
                 findings.append(Finding(
