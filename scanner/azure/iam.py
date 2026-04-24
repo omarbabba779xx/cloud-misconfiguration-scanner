@@ -1,3 +1,4 @@
+import sys
 from azure.mgmt.authorization import AuthorizationManagementClient
 from azure.core.exceptions import HttpResponseError
 from scanner.base import BaseScanner, Category, Finding, Severity
@@ -74,7 +75,7 @@ class AzureIAMScanner(BaseScanner):
                     extra={"owner_count": owner_count},
                 ))
         except HttpResponseError as e:
-            print(f"[Azure/IAM] Error: {e}")
+            print(f"[Azure/IAM] Error: {e}", file=sys.stderr)
         return findings
 
     def _check_custom_roles(self) -> list[Finding]:

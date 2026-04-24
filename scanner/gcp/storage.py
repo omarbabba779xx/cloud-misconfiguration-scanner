@@ -1,3 +1,4 @@
+import sys
 from google.cloud import storage as gcs
 from google.api_core.exceptions import GoogleAPIError
 from scanner.base import BaseScanner, Category, Finding, Severity
@@ -21,7 +22,7 @@ class GCSScanner(BaseScanner):
                 findings += self._check_versioning(bucket)
                 findings += self._check_logging(bucket)
         except GoogleAPIError as e:
-            print(f"[GCP/Storage] Error: {e}")
+            print(f"[GCP/Storage] Error: {e}", file=sys.stderr)
         return findings
 
     def _check_public_iam(self, bucket) -> list[Finding]:
@@ -55,7 +56,6 @@ class GCSScanner(BaseScanner):
         return findings
 
     def _check_uniform_access(self, bucket) -> list[Finding]:
-        bucket.reload()
         if not bucket.iam_configuration.uniform_bucket_level_access_enabled:
             return [Finding(
                 provider="gcp",

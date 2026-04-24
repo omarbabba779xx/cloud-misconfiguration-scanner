@@ -1,3 +1,4 @@
+import sys
 import boto3
 from botocore.exceptions import ClientError
 from scanner.base import BaseScanner, Category, Finding, Severity
@@ -45,7 +46,7 @@ class NetworkScanner(BaseScanner):
                     for perm in sg.get("IpPermissions", []):
                         findings += self._evaluate_ingress(sg_id, sg_name, perm, region)
         except ClientError as e:
-            print(f"[AWS/Network] Error: {e}")
+            print(f"[AWS/Network] Error: {e}", file=sys.stderr)
         return findings
 
     def _evaluate_ingress(self, sg_id, sg_name, perm, region) -> list[Finding]:
@@ -147,32 +148,63 @@ class NetworkScanner(BaseScanner):
             nacls = self.ec2.describe_network_acls().get("NetworkAcls", [])
             for nacl in nacls:
                 nacl_id = nacl["NetworkAclId"]
+                region = self.ec2.meta.region_name
                 for entry in nacl.get("Entries", []):
                     if entry.get("Egress"):
                         continue
                     if entry.get("RuleAction") != "allow":
                         continue
                     cidr = entry.get("CidrBlock", "") or entry.get("Ipv6CidrBlock", "")
-                    if cidr in (_ANY_IPV4, _ANY_IPV6):
-                        port_range = entry.get("PortRange", {})
-                        from_p = port_range.get("From", 0)
-                        to_p = port_range.get("To", 65535)
-                        if from_p == 0 and to_p == 65535:
-                            findings.append(Finding(
-                                provider="aws",
-                                category=Category.NETWORK,
-                                severity=Severity.HIGH,
-                                resource_type="Network ACL",
-                                resource_id=nacl_id,
-                                title=f"NACL '{nacl_id}' allows all inbound traffic from the internet",
-                                description=(
-                                    f"A NACL rule (#{entry['RuleNumber']}) allows all traffic from {cidr}."
-                                ),
-                                recommendation=(
-                                    "Replace the catch-all allow rule with specific port/CIDR rules."
-                                ),
-                                region=self.ec2.meta.region_name,
-                            ))
+                    if cidr not in (_ANY_IPV4, _ANY_IPV6):
+                        continue
+                    protocol = entry.get("Protocol", "-1")
+                    port_range = entry.get("PortRange", {})
+                    from_p = port_range.get("From", 0)
+                    to_p = port_range.get("To", 65535)
+                    # All-traffic rule (protocol -1) or full port range
+                    if protocol == "-1" or (from_p == 0 and to_p == 65535):
+                        findings.append(Finding(
+                            provider="aws",
+                            category=Category.NETWORK,
+                            severity=Severity.HIGH,
+                            resource_type="Network ACL",
+                            resource_id=nacl_id,
+                            title=f"NACL '{nacl_id}' allows all inbound traffic from the internet",
+                            description=(
+                                f"A NACL rule (#{entry['RuleNumber']}) allows all traffic from {cidr}."
+                            ),
+                            recommendation=(
+                                "Replace the catch-all allow rule with specific port/CIDR rules."
+                            ),
+                            region=region,
+                        ))
+                    else:
+                        # Check for specific risky port exposure
+                        for port, service in _RISKY_PORTS.items():
+                            if from_p <= port <= to_p:
+                                severity = (
+                                    Severity.CRITICAL if port in (22, 3389) else Severity.HIGH
+                                )
+                                findings.append(Finding(
+                                    provider="aws",
+                                    category=Category.NETWORK,
+                                    severity=severity,
+                                    resource_type="Network ACL",
+                                    resource_id=nacl_id,
+                                    title=(
+                                        f"NACL '{nacl_id}' allows {service} "
+                                        f"(port {port}) from the internet"
+                                    ),
+                                    description=(
+                                        f"NACL rule (#{entry['RuleNumber']}) allows {service} "
+                                        f"(port {port}) from {cidr}."
+                                    ),
+                                    recommendation=(
+                                        f"Restrict {service} to specific trusted CIDRs in the NACL."
+                                    ),
+                                    region=region,
+                                    extra={"port": port, "service": service},
+                                ))
         except ClientError:
             pass
         return findings

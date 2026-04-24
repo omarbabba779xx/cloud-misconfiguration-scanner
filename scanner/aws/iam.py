@@ -1,8 +1,21 @@
+import csv
+import io
 import json
+import sys
+import time
+import datetime
 import boto3
 from botocore.exceptions import ClientError
 from scanner.base import BaseScanner, Category, Finding, Severity
 
+
+_STALE_KEY_DAYS = 90
+
+_DANGEROUS_MANAGED_ARNS = {
+    "arn:aws:iam::aws:policy/AdministratorAccess": "AdministratorAccess",
+    "arn:aws:iam::aws:policy/PowerUserAccess": "PowerUserAccess",
+    "arn:aws:iam::aws:policy/IAMFullAccess": "IAMFullAccess",
+}
 
 _DANGEROUS_ACTIONS = {
     "*",
@@ -25,22 +38,24 @@ class IAMScanner(BaseScanner):
 
     def __init__(self, session: boto3.Session):
         self.iam = session.client("iam")
+        self._credential_report: list[dict] | None = None
 
     def scan(self) -> list[Finding]:
+        self._credential_report = self._get_credential_report()
         findings = []
         findings += self._check_root_access_keys()
         findings += self._check_mfa_on_root()
         findings += self._check_users_without_mfa()
         findings += self._check_unused_credentials()
         findings += self._check_overly_permissive_policies()
+        findings += self._check_dangerous_managed_policies()
         findings += self._check_password_policy()
         return findings
 
     def _check_root_access_keys(self) -> list[Finding]:
         findings = []
         try:
-            report = self._get_credential_report()
-            for row in report:
+            for row in (self._credential_report or []):
                 if row.get("user") == "<root_account>":
                     ak1 = row.get("access_key_1_active", "false")
                     ak2 = row.get("access_key_2_active", "false")
@@ -61,8 +76,8 @@ class IAMScanner(BaseScanner):
                                 "Use IAM users/roles with least-privilege for programmatic access."
                             ),
                         ))
-        except ClientError:
-            pass
+        except Exception as exc:
+            print(f"[AWS/IAM] Root access key check error: {exc}", file=sys.stderr)
         return findings
 
     def _check_mfa_on_root(self) -> list[Finding]:
@@ -125,20 +140,37 @@ class IAMScanner(BaseScanner):
         return findings
 
     def _check_unused_credentials(self) -> list[Finding]:
-        import datetime
         findings = []
         try:
-            report = self._get_credential_report()
-            cutoff = datetime.timedelta(days=90)
+            cutoff = datetime.timedelta(days=_STALE_KEY_DAYS)
             now = datetime.datetime.now(datetime.timezone.utc)
-            for row in report:
+            for row in (self._credential_report or []):
                 user = row.get("user", "")
                 if user == "<root_account>":
                     continue
                 for key_n in ("1", "2"):
                     active = row.get(f"access_key_{key_n}_active", "false") == "true"
+                    if not active:
+                        continue
                     last_used = row.get(f"access_key_{key_n}_last_used_date", "N/A")
-                    if active and last_used not in ("N/A", "no_information"):
+                    if last_used in ("N/A", "no_information"):
+                        findings.append(Finding(
+                            provider="aws",
+                            category=Category.IAM_PERMISSIONS,
+                            severity=Severity.MEDIUM,
+                            resource_type="IAM Access Key",
+                            resource_id=f"{user}/key{key_n}",
+                            title=f"Access key {key_n} for user '{user}' has never been used",
+                            description=(
+                                f"Access key {key_n} for '{user}' is active but has never been used. "
+                                "Unused keys represent unnecessary attack surface."
+                            ),
+                            recommendation=(
+                                "Deactivate or delete access keys that have never been used. "
+                                "Issue keys only when needed and rotate them regularly."
+                            ),
+                        ))
+                    else:
                         try:
                             lu_dt = datetime.datetime.fromisoformat(last_used.replace("Z", "+00:00"))
                             if now - lu_dt > cutoff:
@@ -150,8 +182,8 @@ class IAMScanner(BaseScanner):
                                     resource_id=f"{user}/key{key_n}",
                                     title=f"Stale access key for user '{user}'",
                                     description=(
-                                        f"Access key {key_n} for '{user}' has not been used in over 90 days "
-                                        f"(last used: {last_used[:10]})."
+                                        f"Access key {key_n} for '{user}' has not been used in over "
+                                        f"{_STALE_KEY_DAYS} days (last used: {last_used[:10]})."
                                     ),
                                     recommendation=(
                                         "Rotate or deactivate unused access keys. "
@@ -161,8 +193,8 @@ class IAMScanner(BaseScanner):
                                 ))
                         except ValueError:
                             pass
-        except ClientError:
-            pass
+        except Exception as exc:
+            print(f"[AWS/IAM] Unused credentials check error: {exc}", file=sys.stderr)
         return findings
 
     def _check_overly_permissive_policies(self) -> list[Finding]:
@@ -263,16 +295,54 @@ class IAMScanner(BaseScanner):
                 ))
         return findings
 
+    def _check_dangerous_managed_policies(self) -> list[Finding]:
+        """Flag users/roles that have high-privilege AWS managed policies attached."""
+        findings = []
+        for arn, policy_name in _DANGEROUS_MANAGED_ARNS.items():
+            for entity_filter, entity_key, resource_type in (
+                ("User", "PolicyUsers", "IAM User"),
+                ("Role", "PolicyRoles", "IAM Role"),
+            ):
+                try:
+                    paginator = self.iam.get_paginator("list_entities_for_policy")
+                    for page in paginator.paginate(PolicyArn=arn, EntityFilter=entity_filter):
+                        for entity in page.get(entity_key, []):
+                            entity_name = entity.get(
+                                "UserName" if entity_filter == "User" else "RoleName", "unknown"
+                            )
+                            findings.append(Finding(
+                                provider="aws",
+                                category=Category.IAM_PERMISSIONS,
+                                severity=Severity.HIGH,
+                                resource_type=resource_type,
+                                resource_id=entity_name,
+                                title=(
+                                    f"{resource_type} '{entity_name}' has '{policy_name}' attached"
+                                ),
+                                description=(
+                                    f"The managed policy '{policy_name}' grants very broad "
+                                    f"permissions to {resource_type.lower()} '{entity_name}'."
+                                ),
+                                recommendation=(
+                                    f"Replace '{policy_name}' with a custom policy granting "
+                                    "only the minimum required permissions."
+                                ),
+                                extra={"managed_policy_arn": arn},
+                            ))
+                except ClientError:
+                    pass
+        return findings
+
     def _get_credential_report(self) -> list[dict]:
-        import csv
-        import io
-        import time
-        self.iam.generate_credential_report()
-        for _ in range(10):
-            resp = self.iam.get_credential_report()
-            if resp.get("ReportFormat") == "text/csv":
-                content = resp["Content"].decode("utf-8")
-                reader = csv.DictReader(io.StringIO(content))
-                return list(reader)
-            time.sleep(2)
+        try:
+            self.iam.generate_credential_report()
+            for _ in range(10):
+                resp = self.iam.get_credential_report()
+                if resp.get("ReportFormat") == "text/csv":
+                    content = resp["Content"].decode("utf-8")
+                    reader = csv.DictReader(io.StringIO(content))
+                    return list(reader)
+                time.sleep(2)
+        except ClientError as exc:
+            print(f"[AWS/IAM] Could not generate credential report: {exc}", file=sys.stderr)
         return []

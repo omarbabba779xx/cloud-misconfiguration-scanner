@@ -4,8 +4,91 @@
 ![Providers](https://img.shields.io/badge/Providers-AWS%20%7C%20Azure%20%7C%20GCP-orange)
 ![Tests](https://img.shields.io/badge/Tests-156%20passed-brightgreen)
 ![License](https://img.shields.io/badge/License-MIT-green)
+![Security](https://img.shields.io/badge/Security-Hardened-red?logo=shield)
 
 **CloudHawk** is a modular, multi-cloud security scanner that detects misconfigurations across **AWS**, **Azure**, and **GCP** — in parallel, with no cloud credentials hard-coded.
+
+---
+
+## Architecture Diagram
+
+```mermaid
+graph TD
+    CLI["🖥️ main.py — CLI (Click)"]:::entry --> TPE["⚡ ThreadPoolExecutor\nProviders run in parallel"]:::engine
+
+    TPE --> AWS["☁️ AWS"]:::aws
+    TPE --> AZ["☁️ Azure"]:::azure
+    TPE --> GCP["☁️ GCP"]:::gcp
+
+    AWS --> A1["🔑 IAM Scanner\nroot keys · stale keys · MFA\ndangerous managed policies\npassword policy"]
+    AWS --> A2["🪣 S3 Scanner\nACLs · Block Public Access\nencryption · versioning"]
+    AWS --> A3["📋 CloudTrail Scanner\nmulti-region · validation\nConfig recorder"]
+    AWS --> A4["🌐 Network Scanner\nSecurity Groups · NACLs\ndefault VPC"]
+
+    AZ --> B1["🔑 RBAC Scanner\nOwner/Contributor · wildcard roles"]
+    AZ --> B2["🪣 Storage Scanner\nblob public access · HTTPS · TLS"]
+    AZ --> B3["🔐 MFA Scanner async\nConditional Access · per-user\npaginated Graph API"]
+    AZ --> B4["📋 Monitor Scanner\nactivity log alerts\ndiagnostic settings"]
+    AZ --> B5["🌐 NSG Scanner\nrisky inbound rules"]
+
+    GCP --> C1["🔑 IAM Scanner\npublic members · primitive roles\nowner count"]
+    GCP --> C2["🪣 GCS Scanner\npublic IAM · uniform access\nversioning · logging"]
+    GCP --> C3["🔐 2SV Scanner\nper-user enrollment\nWorkspace Admin SDK"]
+    GCP --> C4["📋 Logging Scanner\nlog sinks · audit config\nData Access logs"]
+    GCP --> C5["🌐 Firewall Scanner\n0.0.0.0/0 rules\ndefault VPC network"]
+
+    A1 & A2 & A3 & A4 & B1 & B2 & B3 & B4 & B5 & C1 & C2 & C3 & C4 & C5 --> F["📊 Findings\nlist[Finding]"]:::findings
+
+    F --> R1["🖨️ Console\nRich colored table"]
+    F --> R2["📄 JSON\nstructured report"]
+    F --> R3["🌐 HTML\ninteractive dashboard"]
+
+    classDef entry fill:#1e293b,color:#f8fafc,stroke:#475569
+    classDef engine fill:#0f172a,color:#94a3b8,stroke:#334155
+    classDef aws fill:#ff9900,color:#000,stroke:#cc7a00
+    classDef azure fill:#0078d4,color:#fff,stroke:#005a9e
+    classDef gcp fill:#4285f4,color:#fff,stroke:#1a56db
+    classDef findings fill:#16a34a,color:#fff,stroke:#15803d
+```
+
+---
+
+## Scan Flow
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant User
+    participant CLI as main.py
+    participant TPE as ThreadPoolExecutor
+    participant SDK as Cloud SDKs (read-only)
+    participant Report as reports/renderer.py
+
+    User->>CLI: python main.py --provider aws --output all --fail-on CRITICAL
+    CLI->>TPE: Submit all category scanners concurrently
+    TPE->>SDK: IAM / Storage / Network / Logging API calls
+    SDK-->>TPE: Resources & configurations
+    TPE-->>CLI: list[Finding]
+    CLI->>CLI: Filter by --min-severity
+    CLI->>Report: render_console()  →  Rich colored table
+    CLI->>Report: save_json()       →  scan-report.json
+    CLI->>Report: save_html()       →  scan-report.html (XSS-safe)
+    Report-->>User: ✅ Reports ready
+    CLI-->>User: exit 0 (clean) or exit 1 (--fail-on triggered)
+```
+
+---
+
+## Severity Distribution (example output)
+
+```mermaid
+pie title Finding Severity Distribution
+    "CRITICAL" : 3
+    "HIGH"     : 8
+    "MEDIUM"   : 12
+    "LOW"      : 4
+    "INFO"     : 5
+```
 
 ---
 
@@ -13,15 +96,15 @@
 
 | Category | AWS | Azure | GCP |
 |---|---|---|---|
-| **Public Storage** | S3 public ACLs, Block Public Access, encryption, versioning | Blob public access, containers, HTTPS, TLS version | GCS `allUsers` IAM, uniform access, versioning, logging |
-| **IAM / Permissions** | Root access keys, stale keys, wildcard policies, password policy | Owner/Contributor at subscription scope, wildcard custom roles | Primitive roles (`owner`/`editor`), public project IAM |
-| **Logging** | CloudTrail (multi-region, log validation), AWS Config recorder | Activity log alerts, diagnostic settings | Log sinks, data access audit configs |
-| **MFA / 2SV** | Root MFA, per-user MFA enforcement | Conditional Access MFA policy, per-user enrollment (MS Graph) | Per-user 2-Step Verification (Workspace Admin SDK) |
-| **Network Exposure** | Security groups (SSH/RDP/DB), NACLs, default VPC SG | NSG rules, direct public IPs on NICs | Firewall rules open to `0.0.0.0/0`, default VPC network |
+| **Public Storage** | S3 public ACLs, Block Public Access, encryption, versioning | Blob public access, HTTPS-only, TLS version | GCS `allUsers` IAM, uniform access, versioning, logging |
+| **IAM / Permissions** | Root access keys, **never-used keys**, stale keys, wildcard policies, **AWS managed policies on users/roles** (`AdministratorAccess` etc.), password policy | Owner/Contributor at subscription scope, wildcard custom roles | Primitive roles (`owner`/`editor`), public project IAM, excess owners |
+| **Logging** | CloudTrail (multi-region **+ active logging verified**, log validation), AWS Config recorder | Activity log alerts, diagnostic settings | Log sinks, data access audit configs |
+| **MFA / 2SV** | Root MFA, per-user console MFA | **Async** Conditional Access MFA policy, **paginated** per-user enrollment (MS Graph) | Per-user 2-Step Verification (Workspace Admin SDK) |
+| **Network Exposure** | Security groups (SSH/RDP/DB), **NACLs (all-port + risky-port rules)**, default VPC SG | NSG inbound rules (risky ports, internet source) | Firewall rules open to `0.0.0.0/0`, default VPC network |
 
 ---
 
-## Architecture
+## Project Structure
 
 ```
 cloud-misconfiguration-scanner/
@@ -31,29 +114,30 @@ cloud-misconfiguration-scanner/
 ├── scanner/
 │   ├── base.py                  # Finding, Severity, Category, BaseScanner
 │   ├── aws/
+│   │   ├── iam.py               # IAM + MFA + dangerous managed policies
 │   │   ├── storage.py           # S3 checks
-│   │   ├── iam.py               # IAM + MFA checks
 │   │   ├── logging.py           # CloudTrail + Config checks
-│   │   └── network.py           # Security groups + NACLs
+│   │   └── network.py           # Security groups + NACLs (risky ports)
 │   ├── azure/
-│   │   ├── storage.py           # Storage account checks
 │   │   ├── iam.py               # RBAC checks
-│   │   ├── mfa.py               # Conditional Access + per-user MFA
+│   │   ├── storage.py           # Storage account checks
+│   │   ├── mfa.py               # Async Conditional Access + paginated per-user MFA
 │   │   ├── logging.py           # Monitor + diagnostic settings
 │   │   └── network.py           # NSG rules
 │   └── gcp/
-│       ├── storage.py           # GCS bucket checks
 │       ├── iam.py               # Project IAM checks
+│       ├── storage.py           # GCS bucket checks
 │       ├── mfa.py               # 2SV via Workspace Admin SDK
 │       ├── logging.py           # Log sinks + audit config
 │       └── network.py           # Firewall rules
 ├── reports/
-│   └── renderer.py              # Console (Rich), JSON, HTML output
-└── tests/                       # 120 unit tests (no cloud credentials needed)
+│   └── renderer.py              # Console (Rich), JSON, HTML (XSS-safe) output
+└── tests/                       # 156 unit tests — no cloud credentials needed
     ├── conftest.py
     ├── aws/
     ├── azure/
     ├── gcp/
+    ├── integration/
     ├── test_renderer.py
     └── test_cli.py
 ```
@@ -106,7 +190,7 @@ Minimum IAM permissions required:
     "iam:GenerateCredentialReport", "iam:GetCredentialReport",
     "iam:GetAccountSummary", "iam:ListUsers", "iam:ListMFADevices",
     "iam:GetLoginProfile", "iam:ListPolicies", "iam:GetPolicyVersion",
-    "iam:GetAccountPasswordPolicy",
+    "iam:GetAccountPasswordPolicy", "iam:ListEntitiesForPolicy",
     "cloudtrail:DescribeTrails", "cloudtrail:GetTrailStatus",
     "config:DescribeConfigurationRecorders",
     "config:DescribeConfigurationRecorderStatus",
@@ -288,10 +372,10 @@ pytest
 ```
 
 ```
-========================= 120 passed in 2.34s =========================
+========================= 156 passed in 34s =========================
 ```
 
-All 120 tests run without any cloud credentials — SDK calls are fully mocked.
+All 156 tests run without any cloud credentials — SDK calls are fully mocked.
 
 ---
 
@@ -355,6 +439,42 @@ jobs:
 | **MEDIUM** | Security weakness that increases attack surface; remediate within 30 days |
 | **LOW** | Defense-in-depth gap; low direct risk but recommended to fix |
 | **INFO** | Informational — missing optional capability |
+
+---
+
+## Security Hardening (v2.0)
+
+This release includes a comprehensive security audit with the following improvements:
+
+### 🔴 Critical Bug Fixes
+
+| Fix | File | Details |
+|---|---|---|
+| **Azure MFA scanner was broken** | `azure/mfa.py` | `msgraph-sdk ≥ 1.0` is async-first — `.get()` returned a coroutine, not a result. Fully rewritten with `asyncio.run()` and `async/await`. |
+| **XSS in HTML reports** | `reports/renderer.py` | Resource names injected raw into HTML. Fixed with `html.escape()` on all dynamic fields. |
+| **GCP 2SV check was a no-op** | `gcp/mfa.py` | `_check_org_2sv_enforcement()` executed a `break` immediately and returned `[]`. Dead method removed. |
+| **Double credential report generation** | `aws/iam.py` | Called `_get_credential_report()` twice (×10 API polls each). Now generated once in `scan()` and cached. |
+| **Never-used access keys ignored** | `aws/iam.py` | Keys with `last_used = "N/A"` were silently skipped — a major security risk. Now flagged as `MEDIUM`. |
+| **AWS managed policies not checked** | `aws/iam.py` | Only customer-managed policies were scanned. Added `_check_dangerous_managed_policies()` for `AdministratorAccess`, `PowerUserAccess`, `IAMFullAccess`. |
+| **CloudTrail multi-region logic wrong** | `aws/logging.py` | A disabled multi-region trail incorrectly set `multi_region_active = True`. Now verifies `is_logging` as well. |
+
+### 🟠 False Positives Eliminated
+
+| Fix | File | Details |
+|---|---|---|
+| **Azure NIC public IP check** | `azure/network.py` | Flagged every web server / public API as `MEDIUM`. Removed — NSG check already covers the risk. |
+| **Azure storage encryption severity** | `azure/storage.py` | Microsoft-managed encryption is the default for all accounts; was `LOW`. Changed to `INFO`. |
+| **NACL check too narrow** | `aws/network.py` | Only caught all-port rules. Extended to detect specific risky ports (SSH, RDP, DB…) in NACLs. |
+| **Azure MFA pagination missing** | `azure/mfa.py` | `top=999` with no loop — tenants with >999 users silently skipped. Replaced with `odata_next_link` pagination loop. |
+
+### 🟡 Code Quality
+
+| Fix | Details |
+|---|---|
+| `print()` → `stderr` | All error messages across every scanner now go to `sys.stderr`, keeping `stdout` clean for JSON/HTML piping. |
+| Imports moved to file top | `csv`, `io`, `time`, `datetime` were imported inside method bodies in `aws/iam.py`. Moved to module level. |
+| Dead code removed | `_HIGH_RISK_ROLES` (gcp/iam.py), `_REQUIRED_LOG_FILTERS` (gcp/logging.py), `_check_org_2sv_enforcement` (gcp/mfa.py), `_check_rdp_management_ports` (azure/network.py). |
+| `bucket.reload()` removed | `gcp/storage.py` — redundant GET API call per bucket; `list_buckets()` already returns full metadata. |
 
 ---
 

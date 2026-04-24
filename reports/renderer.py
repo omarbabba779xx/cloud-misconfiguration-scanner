@@ -1,4 +1,6 @@
+import html as _html
 import json
+import sys
 from datetime import datetime
 from pathlib import Path
 from scanner.base import Finding, Severity
@@ -87,7 +89,7 @@ def save_json(findings: list[Finding], path: str) -> None:
         "findings": [f.to_dict() for f in findings],
     }
     Path(path).write_text(json.dumps(out, indent=2, default=str), encoding="utf-8")
-    print(f"JSON report saved to: {path}")
+    print(f"JSON report saved to: {path}", file=sys.stderr)
 
 
 def save_html(findings: list[Finding], path: str) -> None:
@@ -109,13 +111,13 @@ def save_html(findings: list[Finding], path: str) -> None:
         color = _BADGE.get(f.severity.value, "#6b7280")
         rows += f"""
         <tr>
-          <td><span class="badge" style="background:{color}">{f.severity.value}</span></td>
-          <td>{f.provider.upper()}</td>
-          <td>{f.category.value}</td>
-          <td class="mono">{f.resource_type}</td>
-          <td class="mono">{f.resource_id}</td>
-          <td>{f.title}</td>
-          <td>{f.recommendation}</td>
+          <td><span class="badge" style="background:{color}">{_html.escape(f.severity.value)}</span></td>
+          <td>{_html.escape(f.provider.upper())}</td>
+          <td>{_html.escape(f.category.value)}</td>
+          <td class="mono">{_html.escape(f.resource_type)}</td>
+          <td class="mono">{_html.escape(f.resource_id)}</td>
+          <td>{_html.escape(f.title)}</td>
+          <td>{_html.escape(f.recommendation)}</td>
         </tr>"""
 
     html = f"""<!DOCTYPE html>
@@ -361,4 +363,4 @@ def save_html(findings: list[Finding], path: str) -> None:
 </html>"""
 
     Path(path).write_text(html, encoding="utf-8")
-    print(f"HTML report saved to: {path}")
+    print(f"HTML report saved to: {path}", file=sys.stderr)

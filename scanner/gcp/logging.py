@@ -1,14 +1,7 @@
+import sys
 from google.cloud import logging as gcp_logging
 from google.api_core.exceptions import GoogleAPIError
 from scanner.base import BaseScanner, Category, Finding, Severity
-
-_REQUIRED_LOG_FILTERS = {
-    "audit_admin_activity": 'logName="projects/{project}/logs/cloudaudit.googleapis.com%2Factivity"',
-    "audit_data_access": 'logName="projects/{project}/logs/cloudaudit.googleapis.com%2Fdata_access"',
-    "vpc_firewall_changes": (
-        'resource.type="gce_firewall_rule" AND (protoPayload.methodName:"compute.firewalls")'
-    ),
-}
 
 
 class GCPLoggingScanner(BaseScanner):
@@ -59,7 +52,7 @@ class GCPLoggingScanner(BaseScanner):
                         recommendation="Enable at least one log sink targeting a secure destination.",
                     ))
         except GoogleAPIError as e:
-            print(f"[GCP/Logging] Error: {e}")
+            print(f"[GCP/Logging] Error: {e}", file=sys.stderr)
         return findings
 
     def _check_audit_config(self) -> list[Finding]:
@@ -102,5 +95,5 @@ class GCPLoggingScanner(BaseScanner):
                         extra={"service": service},
                     ))
         except (GoogleAPIError, Exception) as e:
-            print(f"[GCP/Logging/AuditConfig] Error: {e}")
+            print(f"[GCP/Logging/AuditConfig] Error: {e}", file=sys.stderr)
         return findings

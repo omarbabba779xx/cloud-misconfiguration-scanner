@@ -1,3 +1,4 @@
+import sys
 import boto3
 from botocore.exceptions import ClientError
 from scanner.base import BaseScanner, Category, Finding, Severity
@@ -14,7 +15,7 @@ class S3Scanner(BaseScanner):
         try:
             buckets = self.s3.list_buckets().get("Buckets", [])
         except ClientError as e:
-            print(f"[AWS/S3] Permission error: {e}")
+            print(f"[AWS/S3] Permission error: {e}", file=sys.stderr)
             return findings
 
         for bucket in buckets:

@@ -100,11 +100,11 @@ class TestTLSVersion:
 # ── Encryption (CMK) ──────────────────────────────────────────────────────────
 
 class TestEncryption:
-    def test_microsoft_managed_keys_is_low(self):
+    def test_microsoft_managed_keys_is_info(self):
         acc = _account(key_source="Microsoft.Storage")
         scanner = _make_scanner([acc])
         findings = scanner.scan()
-        assert_finding(findings, severity=Severity.LOW, title_contains="Microsoft-managed encryption keys")
+        assert_finding(findings, severity=Severity.INFO, title_contains="Microsoft-managed encryption keys")
 
     def test_cmk_no_finding(self):
         acc = _account(key_source="Microsoft.Keyvault")

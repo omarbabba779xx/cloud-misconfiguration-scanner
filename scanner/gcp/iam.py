@@ -1,3 +1,4 @@
+import sys
 from google.cloud import resourcemanager_v3
 from google.iam.v1 import iam_policy_pb2
 from google.api_core.exceptions import GoogleAPIError
@@ -5,13 +6,6 @@ from scanner.base import BaseScanner, Category, Finding, Severity
 
 _PUBLIC_MEMBERS = {"allUsers", "allAuthenticatedUsers"}
 _PRIMITIVE_ROLES = {"roles/owner", "roles/editor", "roles/viewer"}
-_HIGH_RISK_ROLES = {
-    "roles/owner",
-    "roles/editor",
-    "roles/iam.securityAdmin",
-    "roles/iam.serviceAccountAdmin",
-    "roles/resourcemanager.projectIamAdmin",
-}
 
 
 class GCPIAMScanner(BaseScanner):
@@ -101,5 +95,5 @@ class GCPIAMScanner(BaseScanner):
                 ))
 
         except GoogleAPIError as e:
-            print(f"[GCP/IAM] Error: {e}")
+            print(f"[GCP/IAM] Error: {e}", file=sys.stderr)
         return findings

@@ -1,3 +1,4 @@
+import sys
 from azure.mgmt.storage import StorageManagementClient
 from azure.core.exceptions import HttpResponseError
 from scanner.base import BaseScanner, Category, Finding, Severity
@@ -19,7 +20,7 @@ class AzureStorageScanner(BaseScanner):
                 findings += self._check_min_tls(account)
                 findings += self._check_encryption(account)
         except HttpResponseError as e:
-            print(f"[Azure/Storage] Error: {e}")
+            print(f"[Azure/Storage] Error: {e}", file=sys.stderr)
         return findings
 
     def _check_public_access(self, account) -> list[Finding]:
@@ -107,17 +108,17 @@ class AzureStorageScanner(BaseScanner):
             return [Finding(
                 provider="azure",
                 category=Category.PUBLIC_STORAGE,
-                severity=Severity.LOW,
+                severity=Severity.INFO,
                 resource_type="Azure Storage Account",
                 resource_id=account.id,
                 title=f"Storage account '{account.name}' uses Microsoft-managed encryption keys",
                 description=(
                     "Data is encrypted but key management is handled by Microsoft. "
-                    "Customer-managed keys provide stronger control."
+                    "Customer-managed keys provide stronger control for sensitive workloads."
                 ),
                 recommendation=(
                     "Consider using Customer-Managed Keys (CMK) with Azure Key Vault for "
-                    "sensitive workloads."
+                    "sensitive workloads requiring stricter key control."
                 ),
                 region=account.location,
             )]

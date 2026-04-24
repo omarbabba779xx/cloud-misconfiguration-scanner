@@ -1,3 +1,4 @@
+import sys
 from azure.mgmt.monitor import MonitorManagementClient
 from azure.core.exceptions import HttpResponseError
 from scanner.base import BaseScanner, Category, Finding, Severity
@@ -57,7 +58,7 @@ class AzureLoggingScanner(BaseScanner):
                         extra={"missing_operation": op},
                     ))
         except HttpResponseError as e:
-            print(f"[Azure/Logging] Error: {e}")
+            print(f"[Azure/Logging] Error: {e}", file=sys.stderr)
         return findings
 
     def _check_diagnostic_settings(self) -> list[Finding]:

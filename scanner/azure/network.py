@@ -1,3 +1,4 @@
+import sys
 from azure.mgmt.network import NetworkManagementClient
 from azure.core.exceptions import HttpResponseError
 from scanner.base import BaseScanner, Category, Finding, Severity
@@ -23,7 +24,6 @@ class AzureNetworkScanner(BaseScanner):
     def scan(self) -> list[Finding]:
         findings = []
         findings += self._check_nsgs()
-        findings += self._check_rdp_management_ports()
         return findings
 
     def _check_nsgs(self) -> list[Finding]:
@@ -90,36 +90,7 @@ class AzureNetworkScanner(BaseScanner):
                                     extra={"port": port, "service": service},
                                 ))
         except HttpResponseError as e:
-            print(f"[Azure/Network] Error: {e}")
-        return findings
-
-    def _check_rdp_management_ports(self) -> list[Finding]:
-        """Check VMs with management ports directly exposed via public IP."""
-        findings = []
-        try:
-            for vm_nic in self.client.network_interfaces.list_all():
-                for ip_cfg in (vm_nic.ip_configurations or []):
-                    pub_ip_ref = ip_cfg.public_ip_address
-                    if pub_ip_ref:
-                        findings.append(Finding(
-                            provider="azure",
-                            category=Category.NETWORK,
-                            severity=Severity.MEDIUM,
-                            resource_type="Azure Network Interface",
-                            resource_id=vm_nic.id,
-                            title=f"NIC '{vm_nic.name}' has a public IP address directly attached",
-                            description=(
-                                "A public IP is directly associated with this NIC. "
-                                "If NSG rules permit, management ports may be exposed."
-                            ),
-                            recommendation=(
-                                "Route access through Azure Bastion, VPN, or a load balancer. "
-                                "Remove direct public IPs from VM NICs where possible."
-                            ),
-                            region=vm_nic.location,
-                        ))
-        except HttpResponseError:
-            pass
+            print(f"[Azure/Network] Error: {e}", file=sys.stderr)
         return findings
 
     @staticmethod

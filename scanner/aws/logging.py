@@ -1,3 +1,4 @@
+import sys
 import boto3
 from botocore.exceptions import ClientError
 from scanner.base import BaseScanner, Category, Finding, Severity
@@ -61,7 +62,7 @@ class LoggingScanner(BaseScanner):
                 except ClientError:
                     pass
 
-                if trail.get("IsMultiRegionTrail") and trail.get("HomeRegion"):
+                if trail.get("IsMultiRegionTrail") and is_logging:
                     multi_region_active = True
 
             if not multi_region_active:
@@ -81,7 +82,7 @@ class LoggingScanner(BaseScanner):
                     ),
                 ))
         except ClientError as e:
-            print(f"[AWS/CloudTrail] Error: {e}")
+            print(f"[AWS/CloudTrail] Error: {e}", file=sys.stderr)
         return findings
 
     def _check_cloudtrail_log_validation(self) -> list[Finding]:

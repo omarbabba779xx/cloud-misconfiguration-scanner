@@ -1,3 +1,4 @@
+import sys
 from google.cloud import compute_v1
 from google.api_core.exceptions import GoogleAPIError
 from scanner.base import BaseScanner, Category, Finding, Severity
@@ -91,7 +92,7 @@ class GCPNetworkScanner(BaseScanner):
                                     extra={"port": port, "service": service},
                                 ))
         except GoogleAPIError as e:
-            print(f"[GCP/Network] Error: {e}")
+            print(f"[GCP/Network] Error: {e}", file=sys.stderr)
         return findings
 
     def _check_default_network(self) -> list[Finding]:

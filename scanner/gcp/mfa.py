@@ -1,3 +1,4 @@
+import sys
 from scanner.base import BaseScanner, Category, Finding, Severity
 
 
@@ -17,48 +18,7 @@ class GCPMFAScanner(BaseScanner):
 
     def scan(self) -> list[Finding]:
         findings = []
-        findings += self._check_org_2sv_enforcement()
         findings += self._check_users_without_2sv()
-        return findings
-
-    def _check_org_2sv_enforcement(self) -> list[Finding]:
-        findings = []
-        try:
-            service = self._build_admin_service()
-            if service is None:
-                return findings
-
-            # Check organization-level 2SV policy via Admin Settings API
-            # Uses the Reports/Admin SDK — org unit security settings
-            orgunits = service.orgunits().list(customerId="my_customer", type="all").execute()
-            units = orgunits.get("organizationUnits", [])
-
-            # Root OU is the one with no parentOrgUnitId
-            root_checked = False
-            for ou in units:
-                if "parentOrgUnitId" not in ou:
-                    root_checked = True
-                    # We can't read 2SV policy directly from this API;
-                    # check via users below instead
-                    break
-
-            if not root_checked and not units:
-                # Single-domain org — still check via user enumeration
-                pass
-
-        except ImportError:
-            findings.append(Finding(
-                provider="gcp",
-                category=Category.MFA,
-                severity=Severity.INFO,
-                resource_type="GCP MFA Check",
-                resource_id=self.project,
-                title="google-api-python-client not installed — 2SV enforcement check skipped",
-                description="Install google-api-python-client to enable per-user 2SV checks.",
-                recommendation="pip install google-api-python-client google-auth-httplib2",
-            ))
-        except Exception as e:
-            print(f"[GCP/MFA/OrgPolicy] Error: {e}")
         return findings
 
     def _check_users_without_2sv(self) -> list[Finding]:
@@ -162,9 +122,18 @@ class GCPMFAScanner(BaseScanner):
                     ))
 
         except ImportError:
-            pass  # already reported above
+            findings.append(Finding(
+                provider="gcp",
+                category=Category.MFA,
+                severity=Severity.INFO,
+                resource_type="GCP MFA Check",
+                resource_id=self.project,
+                title="google-api-python-client not installed — 2SV check skipped",
+                description="Install google-api-python-client to enable per-user 2SV checks.",
+                recommendation="pip install google-api-python-client google-auth-httplib2",
+            ))
         except Exception as e:
-            print(f"[GCP/MFA/Users] Error: {e}")
+            print(f"[GCP/MFA/Users] Error: {e}", file=sys.stderr)
         return findings
 
     def _build_admin_service(self):
@@ -187,5 +156,5 @@ class GCPMFAScanner(BaseScanner):
 
             return discovery.build("admin", "directory_v1", credentials=creds, cache_discovery=False)
         except Exception as e:
-            print(f"[GCP/MFA] Could not build Admin SDK client: {e}")
+            print(f"[GCP/MFA] Could not build Admin SDK client: {e}", file=sys.stderr)
             return None
